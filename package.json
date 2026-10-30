@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "remotion studio",
     "build": "remotion render Caminata out/caminata.mp4",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:salmo": "remotion render Salmo23 out/salmo23.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.250",
+    "@remotion/google-fonts": "^4.0.250",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "remotion": "4.0.250"
