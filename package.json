@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "remotion studio",
     "build": "remotion render Caminata out/caminata.mp4",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:agua": "remotion render CicloAgua out/ciclo-del-agua.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.250",
