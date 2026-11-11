@@ -9,7 +9,7 @@
   --font-display:"Baloo 2",system-ui,sans-serif;
   color-scheme:light;
 }
-html,body{height:100%}
+html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--font-display);overflow:hidden;
   touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
@@ -30,7 +30,9 @@ const SAVE='dona-mania-v1';
 const fresh=()=>({money:0,earned:0,cap:0,spd:0,oven:0,price:0,coffee:0,h1:0,h2:0,prestige:0,mute:0,tut:0,paid:{}});
 let st=fresh();
 try{const s=JSON.parse(localStorage.getItem(SAVE)||'null');if(s&&typeof s==='object')st=Object.assign(fresh(),s);if(!st.paid)st.paid={};}catch(e){}
-function save(){try{localStorage.setItem(SAVE,JSON.stringify(st));}catch(e){}}
+for(const k of['money','earned','cap','spd','oven','price','coffee','h1','h2','prestige','pile'])if(!isFinite(st[k]))st[k]=0;
+if(!st.coffee)st.h2=0;
+function save(){st.pile=cash.pile;try{localStorage.setItem(SAVE,JSON.stringify(st));}catch(e){}}
 
 const DONUT=0,COFFEE=1;
 const BASE_PRICE=[5,9],ITEM_H=[7,11];
@@ -62,7 +64,7 @@ const machines=[
 ];
 const pickupOf=m=>({x:m.x,y:m.y+88});
 const counter={stock:[0,0],x:[250,470],y:838};
-const cash={x:652,y:735,pile:0};
+const cash={x:652,y:735,pile:0};cash.pile=Math.max(0,st.pile||0);
 const SLOTS=[170,290,410,530].map(x=>({x,y:918,c:null}));
 const player={x:360,y:540,vx:0,vy:0,face:1,walk:0,moving:false,carry:[],lean:0,takeT:0,dropT:0,cashT:0,padT:0};
 let helpers=[],customers=[],fly=[],floats=[],confetti=[];
@@ -150,8 +152,8 @@ function burst(x,y,n=36){
 }
 function fmt(n){n=Math.floor(n);
   if(n<10000)return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,',');
-  if(n<1e6)return (n/1e3).toFixed(n<1e5?1:0)+'K';
-  return (n/1e6).toFixed(2)+'M';}
+  const u=['K','M','B','T'];let i=-1;while(n>=999.5&&i<u.length-1){n/=1000;i++;}
+  return (n<10?n.toFixed(2):n<100?n.toFixed(1):n.toFixed(0))+u[i];}
 
 /* ---------- update ---------- */
 function moveToward(o,tx,ty,spd,dt){
@@ -166,7 +168,8 @@ function buy(p){
   if(p.id==='branch'){
     const pr=st.prestige+1,mute=st.mute;
     st=Object.assign(fresh(),{prestige:pr,mute,tut:1,earned:st.earned});
-    player.carry.length=0;counter.stock=[0,0];cash.pile=0;machines[1].stock=0;
+    player.carry.length=0;counter.stock=[0,0];machines[1].stock=0;machines[0].stock=Math.min(machines[0].stock,8);
+    customers=[];for(const s of SLOTS)s.c=null;spawnT=0.4;
     banner={txt:'¡Sucursal nº '+(pr+1)+'!',sub:'Todo se vende a +'+pr*100+'%',t:0};
     burst(player.x,player.y,90);
   }else{
@@ -174,7 +177,7 @@ function buy(p){
     floatTxt(p.x,p.y-40,'¡'+p.name+' mejorado!','#fff6e6');
     burst(p.x,p.y,40);
   }
-  syncHelpers();sfx.unlock();buzz(40);save();
+  player.padLock=true;syncHelpers();sfx.unlock();buzz(40);save();
 }
 function update(dt){
   time+=dt;
@@ -228,7 +231,8 @@ function update(dt){
   /* pads */
   let onPad=null;
   for(const p of PADS){if(padOn(p)&&Math.abs(player.x-p.x)<48&&Math.abs(player.y-p.y)<48){onPad=p;break;}}
-  if(onPad&&st.money>=1){
+  if(!onPad)player.padLock=false;
+  if(onPad&&st.money>=1&&!player.padLock){
     player.padT+=dt;
     if(player.padT>0.35){
       const cost=costOf(onPad),paid=st.paid[onPad.id]||0;
@@ -285,7 +289,7 @@ function update(dt){
           const pay=c.n*priceOf(c.t);cash.pile+=pay;st.earned+=pay;
           for(let i=0;i<Math.min(6,c.n+1);i++)fly.push({kind:'bill',x0:c.x,y0:c.y-40,to:cash,oy:-12,t:-i*0.05,dur:0.4});
           floatTxt(c.x,c.y-74,'+$'+fmt(pay),'#ffe27a');sfx.sell();
-          c.state='out';c.slot.c=null;c.tx=c.x<W/2?-80:W+80;c.ty=rand(1010,1120);
+          c.state='out';c.slot.c=null;c.tx=c.x<W/2?-520:W+520;c.ty=rand(1010,1120);
         }
       }
     }else{moveToward(c,c.tx,c.ty,150,dt);if(Math.abs(c.x-c.tx)<6)c.dead=true;}
@@ -390,7 +394,7 @@ function tutorialTarget(){
     if(st.tut===0&&cheap&&st.money>=costOf(cheap))return{x:cheap.x,y:cheap.y-60,msg:'Párate en el recuadro para comprar la mejora'};
     if(cash.pile>=1&&!player.carry.length)return{x:cash.x,y:cash.y-52,msg:'¡Recoge tu dinero!'};
     if(player.carry.length)return{x:360,y:716,msg:'Lleva las donas al mostrador'};
-    return{x:180,y:150,msg:st.earned<5?'Arrastra el dedo para moverte y recoge donas':'Recoge más donas del horno'};
+    return{x:180,y:150,msg:st.earned<5?(matchMedia('(pointer:coarse)').matches?'Arrastra el dedo':'Arrastra o usa las flechas')+' para moverte y recoge donas':'Recoge más donas del horno'};
   }
   st.tut=2;return null;
 }
@@ -452,7 +456,7 @@ function draw(){
   ents.sort((a,b)=>a.y-b.y);for(const e of ents)e.d();
 
   /* counter + side walls */
-  g.fillStyle='#8f3524';g.fillRect(Math.min(vx0,-14)-20,FLOOR_H+44,110+14+20-Math.min(vx0,-14)+0,26);
+  g.fillStyle='#8f3524';g.fillRect(-14,FLOOR_H+44,124,26);
   g.fillStyle='#c8553d';g.fillRect(-14,FLOOR_H,124,46);
   g.fillStyle='#8f3524';g.fillRect(610,FLOOR_H+44,124,26);
   g.fillStyle='#c8553d';g.fillRect(610,FLOOR_H,124,46);
