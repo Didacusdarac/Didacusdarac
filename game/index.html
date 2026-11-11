@@ -499,7 +499,7 @@ function drawMachine(m){
   box(x-10,y+9,20,5,'#fff6e6');trayStack(m.t,x,y+11,m.stock);
 }
 function drawChar(o,kind,pal,key){
-  const x=A(o.x),y=B(o.y),fr=o.moving?(Math.floor(o.walk/2.2)%2):0,flip=(o.face||1)<0;
+  const x=A(o.x),y=B(o.y),fr=o.moving?((Math.floor(o.walk/2.2)%2)+2)%2:0,flip=(o.face||1)<0;
   pel(x,y,6,2,SHADOW);
   const grid=(kind==='guest'?GUEST:CHEF).concat([FEET[fr]]);
   const c=sprite(key+'|'+fr,grid,pal,flip);blit(c,x-6,y-c.height+1-(fr?1:0));
@@ -625,7 +625,7 @@ function draw(){
 /* ---------- loop ---------- */
 let last=performance.now();
 function frame(now){
-  let dt=(now-last)/1000;last=now;if(dt>0.25)dt=0.25;
+  let dt=(now-last)/1000;last=now;if(!(dt>0))dt=0;if(dt>0.25)dt=0.25;
   const steps=Math.max(1,Math.ceil(dt/0.034));
   for(let i=0;i<steps;i++)update(dt/steps);
   draw();requestAnimationFrame(frame);
