@@ -95,7 +95,21 @@ syncHelpers();
 
 /* ---------- audio ---------- */
 let ac=null;
-function initAudio(){if(ac)return;try{ac=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+function initAudio(){if(ac){if(ac.state==='suspended'&&!document.hidden)ac.resume();return;}
+  try{ac=new (window.AudioContext||window.webkitAudioContext)();}catch(e){return;}
+  loadMusic();}
+/* background music: fetched next to the page, decoded once and looped by Web Audio (no gap between loops) */
+let mGain=null,mSrc=null,mLoading=false;
+const MUSIC_VOL=0.32;
+function loadMusic(){
+  if(mLoading||!ac)return;mLoading=true;
+  try{mGain=ac.createGain();mGain.gain.value=st.mute?0:MUSIC_VOL;mGain.connect(ac.destination);}catch(e){return;}
+  fetch('music.mp3').then(r=>{if(!r.ok)throw 0;return r.arrayBuffer();})
+   .then(b=>new Promise((ok,no)=>ac.decodeAudioData(b,ok,no)))
+   .then(buf=>{mSrc=ac.createBufferSource();mSrc.buffer=buf;mSrc.loop=true;mSrc.connect(mGain);mSrc.start();})
+   .catch(()=>{});
+}
+function musicSync(){if(mGain&&ac)mGain.gain.setTargetAtTime(st.mute?0:MUSIC_VOL,ac.currentTime,0.08);}
 function beep(f,d=0.08,type='sine',v=0.07,slide=0,delay=0){
   if(st.mute||!ac)return;
   try{const t0=ac.currentTime+delay,o=ac.createOscillator(),ga=ac.createGain();
@@ -136,7 +150,7 @@ function pt(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.
 cv.addEventListener('pointerdown',e=>{
   initAudio();if(ac&&ac.state==='suspended')ac.resume();
   const p=pt(e),m=muteBtn();
-  if(Math.hypot(p.x-m.x,p.y-m.y)<m.r+8){st.mute=st.mute?0:1;save();e.preventDefault();return;}
+  if(Math.hypot(p.x-m.x,p.y-m.y)<m.r+8){st.mute=st.mute?0:1;musicSync();save();e.preventDefault();return;}
   if(joy.on||e.button>0)return;
   joy.on=true;joy.id=e.pointerId;joy.ox=p.x;joy.oy=p.y;joy.x=joy.y=0;
   try{cv.setPointerCapture(e.pointerId);}catch(_){}
@@ -155,7 +169,7 @@ addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;initAudio();
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))e.preventDefault();});
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
 addEventListener('blur',()=>{for(const k in keys)keys[k]=false;joy.on=false;joy.x=joy.y=0;});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)save();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){save();try{ac&&ac.suspend();}catch(e){}}else{try{ac&&ac.resume();}catch(e){}}});
 
 /* ---------- effects ---------- */
 function flyItem(kind,x0,y0,to,oy,dur=0.28){fly.push({kind,x0,y0,to,oy,t:0,dur});}
@@ -338,6 +352,7 @@ function update(dt){
   else if(st.earned>150){rush.next-=dt;if(rush.next<=0){rush.left=15;spawnT=0;
     banner={txt:'¡HORA PICO!',sub:'Más clientes y pagan +50%',t:0};[784,988,1175].forEach((f,i)=>beep(f,0.14,'square',0.04,0,i*0.09));buzz(60);}}
   if(banner){banner.t+=dt;if(banner.t>3.2)banner=null;}
+  if(mSrc&&ac)mSrc.playbackRate.setTargetAtTime(rush.left>0?1.07:1,ac.currentTime,0.4);
   shownMoney+=(st.money-shownMoney)*Math.min(1,dt*12);
   if(Math.abs(st.money-shownMoney)<0.5)shownMoney=st.money;
   saveT+=dt;if(saveT>3){saveT=0;save();}
@@ -615,7 +630,7 @@ function frame(now){
   for(let i=0;i<steps;i++)update(dt/steps);
   draw();requestAnimationFrame(frame);
 }
-window.__game={get st(){return st;},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
+window.__game={get st(){return st;},get music(){return {on:!!mSrc,rate:mSrc?mSrc.playbackRate.value:0,vol:mGain?mGain.gain.value:-1,state:ac?ac.state:"none"};},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
   get customers(){return customers;},get helpers(){return helpers;},
   reset(){st=fresh();player.carry.length=0;counter.stock=[0,0,0];cash.pile=0;syncHelpers();save();}};
 requestAnimationFrame(frame);
