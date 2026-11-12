@@ -1,8 +1,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <title>Dona Manía</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&display=swap">
 <style>
+@font-face{font-family:"Pixelify Sans";font-weight:500 700;font-display:swap;src:url(fonts/PixelifySans.woff2) format("woff2");}
 /* Layout: one full-screen canvas. The world is drawn into a tiny low-res buffer and scaled up
    with nearest-neighbour for a pixel-art look; text is drawn crisp on top. Single committed look. */
 :root{
@@ -19,10 +19,14 @@ canvas{display:block;width:100%;height:100%;touch-action:none;outline:none;image
 <script>
 (()=>{
 'use strict';
+let booted=false;setTimeout(()=>{booted=true;},3000);
+/* last-resort recovery: if the game crashes while booting, park the save under -corrupt and reload once with a fresh one */
+addEventListener('error',()=>{if(booted)return;try{if(sessionStorage.getItem('dm-rec'))return;sessionStorage.setItem('dm-rec','1');
+  localStorage.setItem('dona-mania-v1-corrupt',localStorage.getItem('dona-mania-v1')||'');localStorage.removeItem('dona-mania-v1');location.reload();}catch(e){}});
 const cv=document.getElementById('c'),g=cv.getContext('2d');
 const lo=document.createElement('canvas'),q=lo.getContext('2d');
 const FONT='"Pixelify Sans",ui-monospace,monospace';
-try{document.fonts&&document.fonts.load('700 16px "Pixelify Sans"');}catch(e){}
+try{document.fonts&&document.fonts.load('700 16px "Pixelify Sans"').catch(()=>{});}catch(e){}
 const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const W=720,FLOOR_H=815,WORLD_TOP=-90,WORLD_BOT=1160,P=3; // P = world units per art pixel
 const rand=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -31,17 +35,29 @@ const TAU=Math.PI*2;
 /* ---------- state & save ---------- */
 const SAVE='dona-mania-v1';
 const fresh=()=>({money:0,earned:0,cap:0,spd:0,oven:0,price:0,coffee:0,pizza:0,dm:0,hup:0,hire:0,bar:0,wash:0,prestige:0,mute:0,tut:0,first:0,spec:'',ach:0,nsrv:0,ntip:0,nvip:0,nwash:0,gd:'',gs:0,paid:{}});
-let st=fresh();
-try{const s=JSON.parse(localStorage.getItem(SAVE)||'null');if(s&&typeof s==='object')st=Object.assign(fresh(),s);if(!st.paid||typeof st.paid!=='object')st.paid={};}catch(e){}
-if(st.h1||st.h2){st.hire=Math.max(st.hire,(st.h1?1:0)+(st.h2?1:0));}
-delete st.h1;delete st.h2;delete st.paid.h1;delete st.paid.h2;
+/* Save loading: strict whitelist. Never copies unknown keys (__proto__, junk), never calls
+   valueOf/toString on untrusted objects (a {"toString":1} value used to throw and brick the game). */
 const LIM={cap:8,spd:5,oven:6,price:5,coffee:2,pizza:2,dm:2,hup:5,hire:4,bar:1,wash:3,prestige:9999};
-for(const k in LIM){const v=Math.floor(Number(st[k]));st[k]=isFinite(v)&&v>0?Math.min(v,LIM[k]):0;}
-for(const k of['money','earned','pile','first','nsrv','ntip','nvip','nwash','ach','gs']){const v=Number(st[k]);st[k]=isFinite(v)&&v>0?Math.min(v,1e15):0;}
-if(!['bak','caf','piz'].includes(st.spec))st.spec='';
-st.ach=Math.min(4095,Math.floor(st.ach))||0;st.gs=Math.min(7,Math.floor(st.gs))||0;if(!/^\d{4}-\d{2}-\d{2}$/.test(String(st.gd)))st.gd='';
-st.tut=Math.min(2,Math.max(0,Math.floor(Number(st.tut))||0));st.mute=st.mute?1:0;
-{const pd={};for(const k in st.paid){const v=Number(st.paid[k]);if(isFinite(v)&&v>0&&k in LIM)pd[k]=v;}st.paid=pd;}
+const NUMCAP={money:1e15,earned:1e15,pile:1e15,first:1e15,nsrv:1e15,ntip:1e15,nvip:1e15,nwash:1e15,ach:4095,gs:7,ts:1e15};
+const own=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+const safeNum=v=>{if(typeof v==='string'&&v.length>40)return 0;if(typeof v!=='number'&&typeof v!=='string')return 0;const n=Number(v);return Number.isFinite(n)?n:0;};
+function loadSave(){
+  const s=fresh();let r=null;
+  try{r=JSON.parse(localStorage.getItem(SAVE)||'null');}catch(e){}
+  if(!r||typeof r!=='object'||Array.isArray(r))return s;
+  for(const k in LIM)if(own(r,k)){const v=Math.floor(safeNum(r[k]));s[k]=v>0?Math.min(v,LIM[k]):0;}
+  for(const k in NUMCAP)if(own(r,k)){const v=safeNum(r[k]);s[k]=v>0?Math.min(v,NUMCAP[k]):0;}
+  s.ach=Math.floor(s.ach);s.gs=Math.floor(s.gs);
+  if(own(r,'tut'))s.tut=Math.min(2,Math.max(0,Math.floor(safeNum(r.tut))));
+  s.mute=own(r,'mute')&&r.mute?1:0;
+  s.spec=own(r,'spec')&&['bak','caf','piz'].includes(r.spec)?r.spec:'';
+  s.gd=own(r,'gd')&&typeof r.gd==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.gd)?r.gd:'';
+  if((own(r,'h1')&&r.h1)||(own(r,'h2')&&r.h2))s.hire=Math.max(s.hire,Math.min(LIM.hire,(r.h1?1:0)+(r.h2?1:0))); // legacy saves
+  if(own(r,'paid')&&r.paid&&typeof r.paid==='object'&&!Array.isArray(r.paid)){
+    for(const k in LIM)if(own(r.paid,k)){const v=safeNum(r.paid[k]);if(v>0)s.paid[k]=Math.min(v,1e15);}}
+  return s;
+}
+let st=loadSave();
 function save(){st.pile=cash.pile;if(!title)st.ts=Date.now();try{localStorage.setItem(SAVE,JSON.stringify(st));}catch(e){}}
 
 const DONUT=0,COFFEE=1,PIZZA=2;
@@ -125,6 +141,7 @@ const rush={next:rand(70,100),left:0};
 let offline=null;const spec={open:false};
 let gift=null,shake=0,moneyPulse=0,prevMoney=st.money,bubT=0,achT=1,puffT=0;const puffs=[],toasts=[];
 const NOMENU=/[?&]menu=0\b/.test(location.search);
+const DEBUG=/[?&](menu=0|debug=1)\b/.test(location.search); // exposes window.__game for tests only
 let menu=null;const hold={on:false,id:null,t:0};const HOLD_T=1.2;
 let title=!/[?&]menu=0\b/.test(location.search); // main menu; ?menu=0 skips it (tests)
 let spawnT=0.5,time=0,saveT=0,banner=null,shownMoney=st.money;
@@ -475,7 +492,7 @@ function update(dt){
     player.padT+=dt;
     if(player.padT>0.8){
       const cost=costOf(onPad),paid=st.paid[onPad.id]||0;
-      const amt=Math.min(st.money,cost-paid,Math.max(cost/0.9,60)*dt);
+      const amt=Math.max(0,Math.min(st.money,cost-paid,Math.max(cost/0.9,60)*dt));
       st.money-=amt;st.paid[onPad.id]=paid+amt;
       player.cashT-=dt;if(player.cashT<=0){player.cashT=0.06;flyItem('bill',player.x,player.y-34,onPad,0,0.2);sfx.pay();}
       if(st.paid[onPad.id]>=cost-0.001){player.padT=-0.5;buy(onPad);}
@@ -995,7 +1012,7 @@ function frame(now){
     draw();}catch(e){if(!frame.err){frame.err=1;console.error(e);}}
   requestAnimationFrame(frame);
 }
-window.__game={get st(){return st;},checkAch,checkGift,get gift(){return gift;},get toasts(){return toasts;},achCount,ACH,spec,chooseSpec,checkOffline,get offline(){return offline;},get music(){return {on:!!mSrc,rate:mSrc?mSrc.playbackRate.value:0,vol:mGain?mGain.gain.value:-1,state:ac?ac.state:"none"};},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
+if(DEBUG)window.__game={get st(){return st;},checkAch,checkGift,get gift(){return gift;},get toasts(){return toasts;},achCount,ACH,spec,chooseSpec,checkOffline,get offline(){return offline;},get music(){return {on:!!mSrc,rate:mSrc?mSrc.playbackRate.value:0,vol:mGain?mGain.gain.value:-1,state:ac?ac.state:"none"};},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
   get customers(){return customers;},get helpers(){return helpers;},
   seats:SEATS,plates,washer,platesTotal,openMenu,resetGame,startGame,get title(){return title;},get menu(){return menu;},hold,
   reset(){resetGame();}};

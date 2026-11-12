@@ -1,0 +1,6 @@
+Pixelify Sans
+Copyright The Pixelify Sans Project Authors.
+Licensed under the SIL Open Font License, Version 1.1.
+Full text and details: https://fonts.google.com/specimen/Pixelify+Sans/license
+This file is the Latin subset (woff2) used by Dona Manía. It is bundled so the game
+does not contact Google Fonts at runtime.

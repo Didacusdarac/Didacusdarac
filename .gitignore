@@ -1,2 +1,55 @@
-node_modules
+# dependencias y builds
+node_modules/
+dist/
+build/
+coverage/
+*.log
 .DS_Store
+Thumbs.db
+
+# secretos y claves (nunca se suben)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.cer
+*.crt
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+id_rsa*
+id_ed25519*
+service-account*.json
+google-services.json
+GoogleService-Info.plist
+*.secret
+secrets/
+.supabase/
+supabase/.env*
+supabase/.temp/
+
+# iOS / Capacitor / Xcode
+ios/App/Pods/
+ios/App/build/
+ios/App/App/public/
+ios/DerivedData/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcarchive
+*.ipa
+*.dSYM.zip
+capacitor.config.local.*
+
+# salidas de video pesadas nuevas
+out/*.mp4
+out/*.mov
+
+# local de agentes
+.claude/settings.local.json
+.claude/worktrees/
