@@ -30,15 +30,16 @@ const TAU=Math.PI*2;
 
 /* ---------- state & save ---------- */
 const SAVE='dona-mania-v1';
-const fresh=()=>({money:0,earned:0,cap:0,spd:0,oven:0,price:0,coffee:0,pizza:0,dm:0,hup:0,hire:0,bar:0,wash:0,prestige:0,mute:0,tut:0,first:0,spec:'',paid:{}});
+const fresh=()=>({money:0,earned:0,cap:0,spd:0,oven:0,price:0,coffee:0,pizza:0,dm:0,hup:0,hire:0,bar:0,wash:0,prestige:0,mute:0,tut:0,first:0,spec:'',ach:0,nsrv:0,ntip:0,nvip:0,nwash:0,gd:'',gs:0,paid:{}});
 let st=fresh();
 try{const s=JSON.parse(localStorage.getItem(SAVE)||'null');if(s&&typeof s==='object')st=Object.assign(fresh(),s);if(!st.paid||typeof st.paid!=='object')st.paid={};}catch(e){}
 if(st.h1||st.h2){st.hire=Math.max(st.hire,(st.h1?1:0)+(st.h2?1:0));}
 delete st.h1;delete st.h2;delete st.paid.h1;delete st.paid.h2;
 const LIM={cap:8,spd:5,oven:6,price:5,coffee:2,pizza:2,dm:2,hup:5,hire:4,bar:1,wash:3,prestige:9999};
 for(const k in LIM){const v=Math.floor(Number(st[k]));st[k]=isFinite(v)&&v>0?Math.min(v,LIM[k]):0;}
-for(const k of['money','earned','pile','first']){const v=Number(st[k]);st[k]=isFinite(v)&&v>0?Math.min(v,1e15):0;}
+for(const k of['money','earned','pile','first','nsrv','ntip','nvip','nwash','ach','gs']){const v=Number(st[k]);st[k]=isFinite(v)&&v>0?Math.min(v,1e15):0;}
 if(!['bak','caf','piz'].includes(st.spec))st.spec='';
+st.ach=Math.min(4095,Math.floor(st.ach))||0;st.gs=Math.min(7,Math.floor(st.gs))||0;if(!/^\d{4}-\d{2}-\d{2}$/.test(String(st.gd)))st.gd='';
 st.tut=Math.min(2,Math.max(0,Math.floor(Number(st.tut))||0));st.mute=st.mute?1:0;
 {const pd={};for(const k in st.paid){const v=Number(st.paid[k]);if(isFinite(v)&&v>0&&k in LIM)pd[k]=v;}st.paid=pd;}
 function save(){st.pile=cash.pile;if(!title)st.ts=Date.now();try{localStorage.setItem(SAVE,JSON.stringify(st));}catch(e){}}
@@ -54,6 +55,26 @@ const SPECS=[{id:'bak',name:'Panadería',desc:'Donas x2 · 1 máquina extra grat
  {id:'piz',name:'Pizzería',desc:'Pizza x1.6 · pizzería gratis',t:PIZZA}];
 const specOf=()=>SPECS.find(x=>x.id===st.spec)||null;
 const specMul=t=>{const sp=specOf();return sp&&sp.t===t?(t===PIZZA?1.6:2):1;};
+const ACH=[
+ {n:'Primera venta',d:'Atiende a tu primer cliente',ok:()=>st.first>0},
+ {n:'Barista',d:'Compra la cafetera',ok:()=>st.coffee>=1},
+ {n:'Pizzero',d:'Abre la pizzería',ok:()=>st.pizza>=1},
+ {n:'Equipo de 3',d:'Ten 3 empleados',ok:()=>st.hire>=3},
+ {n:'100 clientes',d:'Atiende a 100 clientes',ok:()=>st.nsrv>=100},
+ {n:'Rey de propinas',d:'Gana 25 propinas',ok:()=>st.ntip>=25},
+ {n:'Cliente VIP',d:'Atiende a 5 VIP',ok:()=>st.nvip>=5},
+ {n:'Buen provecho',d:'Lava 20 platos',ok:()=>st.nwash>=20},
+ {n:'Tienda llena',d:'Todas las máquinas',ok:()=>st.dm>=2&&st.coffee>=2&&st.pizza>=2},
+ {n:'Primera sucursal',d:'Abre tu 2ª sucursal',ok:()=>st.prestige>=1},
+ {n:'Cadena',d:'Llega a la sucursal nº 6',ok:()=>st.prestige>=5},
+ {n:'Millonario',d:'Gana $1M en total',ok:()=>st.earned>=1e6},
+];
+const achCount=()=>ACH.reduce((a,x,i)=>a+((st.ach>>i)&1),0);
+function checkAch(){
+  ACH.forEach((a,i)=>{if(((st.ach>>i)&1)===0&&a.ok()){
+    st.ach|=(1<<i);const bonus=Math.round(Math.max(100,st.earned*0.02));st.money+=bonus;
+    toasts.push({txt:'¡Logro! '+a.n,sub:'+$'+fmt(bonus),t:0});sfx.ach();shake=Math.max(shake,2);save();}});
+}
 const priceOf=t=>BASE_PRICE[t]*mult()*specMul(t);
 const HUD_TOP=104,TIP_T=5,COUNTER_MAX=24,trayMax=()=>8+2*st.oven,HIRE_MAX=4;
 
@@ -102,6 +123,8 @@ const player={x:300,y:600,vx:0,vy:0,face:1,walk:0,moving:false,carry:[],lean:0,t
 let helpers=[],customers=[],fly=[],floats=[],confetti=[];
 const rush={next:rand(70,100),left:0};
 let offline=null;const spec={open:false};
+let gift=null,shake=0,moneyPulse=0,prevMoney=st.money,bubT=0,achT=1,puffT=0;const puffs=[],toasts=[];
+const NOMENU=/[?&]menu=0\b/.test(location.search);
 let menu=null;const hold={on:false,id:null,t:0};const HOLD_T=1.2;
 let title=!/[?&]menu=0\b/.test(location.search); // main menu; ?menu=0 skips it (tests)
 let spawnT=0.5,time=0,saveT=0,banner=null,shownMoney=st.money;
@@ -136,7 +159,7 @@ function openMenu(){
 }
 function closeMenu(){menu=null;hold.on=false;hold.t=0;}
 function menuGeom(){const w=Math.min(300,VW-32),h=290,x=VW/2-w/2,y=Math.max(8,VH*0.5-h/2),bx=x+12,bw=w-24;
-  return{x,y,w,h,resume:{x:bx,y:y+62,w:bw,h:56},sound:{x:bx,y:y+126,w:bw,h:48},home:{x:bx,y:y+182,w:bw,h:44},reset:{x:bx,y:y+240,w:bw,h:36},
+  return{x,y,w,h,resume:{x:bx,y:y+62,w:bw,h:56},sound:{x:bx,y:y+126,w:(bw-8)/2,h:48},ach:{x:bx+(bw+8)/2,y:y+126,w:(bw-8)/2,h:48},home:{x:bx,y:y+182,w:bw,h:44},reset:{x:bx,y:y+240,w:bw,h:36},
     hold:{x:bx,y:y+104,w:bw,h:44},back:{x:bx,y:y+206,w:bw,h:56}};}
 const inRect=(p,r)=>p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;
 function menuTap(p,e){
@@ -144,8 +167,11 @@ function menuTap(p,e){
   if(menu==='main'){
     if(inRect(p,g2.resume))closeMenu();
     else if(inRect(p,g2.sound)){st.mute=st.mute?0:1;musicSync();save();}
+    else if(inRect(p,g2.ach))menu='ach';
     else if(inRect(p,g2.home)){save();closeMenu();title=true;}
     else if(inRect(p,g2.reset)){menu='confirm';hold.on=false;hold.t=0;}
+  }else if(menu==='ach'){
+    if(inRect(p,g2.back))menu='main';
   }else if(menu==='confirm'){
     if(inRect(p,g2.back)){menu='main';hold.on=false;hold.t=0;}
     else if(inRect(p,g2.hold)){hold.on=true;hold.id=e.pointerId;hold.t=0;try{cv.setPointerCapture(e.pointerId);}catch(_){}}
@@ -168,12 +194,22 @@ function resetGame(){
   banner={txt:'¡Empezamos de cero!',sub:'Buena suerte, chef',t:0};
   save();
 }
+const dayKey=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function checkGift(force){
+  if(title||gift||st.earned<30||(NOMENU&&!force))return;
+  const now=new Date(),today=dayKey(now);if(st.gd===today)return;
+  const y=new Date(now);y.setDate(y.getDate()-1);
+  const streak=st.gd===dayKey(y)?(st.gs%7)+1:1;
+  const amt=Math.round(Math.max(100,st.earned*0.03)*(1+0.25*(streak-1)));
+  st.money+=amt;st.gd=today;st.gs=streak;gift={amt,streak};save();sfx.gift();
+}
+function giftGeom(){const w=Math.min(300,VW-32),h=230,x=VW/2-w/2,y=VH*0.42-h/2;return{x,y,w,h,btn:{x:VW/2-90,y:y+h-58,w:180,h:44}};}
 function startGame(){
   if(!title)return;
   title=false;joy.on=false;joy.x=joy.y=0;for(const k in keys)keys[k]=false;
   initAudio();
   if(st.prestige>0&&!st.spec)spec.open=true;
-  checkOffline();save();
+  checkOffline();checkGift();save();
 }
 function chooseSpec(id){
   if(!SPECS.some(x=>x.id===id))return;
@@ -214,13 +250,30 @@ function beep(f,d=0.08,type='sine',v=0.07,slide=0,delay=0){
     ga.gain.setValueAtTime(v,t0);ga.gain.exponentialRampToValueAtTime(0.0008,t0+d);
     o.connect(ga);ga.connect(ac.destination);o.start(t0);o.stop(t0+d+0.02);}catch(e){}
 }
+let nbuf=null;
+function noise(d=0.15,v=0.05,f0=2000,f1=400,delay=0){
+  if(st.mute||!ac)return;
+  try{if(!nbuf){nbuf=ac.createBuffer(1,ac.sampleRate,ac.sampleRate);const a=nbuf.getChannelData(0);for(let i=0;i<a.length;i++)a[i]=Math.random()*2-1;}
+    const t0=ac.currentTime+delay,src=ac.createBufferSource(),fl=ac.createBiquadFilter(),ga=ac.createGain();
+    src.buffer=nbuf;fl.type='lowpass';fl.frequency.setValueAtTime(f0,t0);fl.frequency.exponentialRampToValueAtTime(Math.max(60,f1),t0+d);
+    ga.gain.setValueAtTime(v,t0);ga.gain.exponentialRampToValueAtTime(0.0008,t0+d);
+    src.connect(fl);fl.connect(ga);ga.connect(ac.destination);src.start(t0);src.stop(t0+d+0.02);}catch(e){}
+}
 const sfx={
   take:n=>beep(380+n*32,0.06,'square',0.04),
   drop:n=>beep(520+n*18,0.05,'square',0.035,0.7),
-  cash:()=>beep(1250+rand(0,350),0.04,'square',0.02),
-  sell:()=>{beep(880,0.07,'square',0.035);beep(1320,0.1,'square',0.035,0,0.06);},
+  cash:()=>{beep(1318,0.04,'square',0.02);beep(1760,0.07,'square',0.02,0,0.04);},
+  sell:()=>[660,880,1175].forEach((f,i)=>beep(f,0.09,'triangle',0.045,0,i*0.05)),
+  tip:()=>[1047,1319,1568,2093].forEach((f,i)=>beep(f,0.08,'square',0.03,0,i*0.045)),
+  full:()=>{beep(110,0.14,'sine',0.12,0.5);noise(0.08,0.04,600,200);},
   pay:()=>beep(300+rand(0,60),0.04,'square',0.02),
-  unlock:()=>[523,659,784,1047].forEach((f,i)=>beep(f,0.14,'square',0.05,0,i*0.08)),
+  unlock:()=>{[523,659,784,1047].forEach((f,i)=>beep(f,0.14,'square',0.05,0,i*0.08));noise(0.12,0.03,5000,1500);},
+  fanfare:()=>{[523,523,523,659,784,1047].forEach((f,i)=>beep(f,i>2?0.3:0.1,'square',0.05,0,i*0.11));[262,330,392].forEach(f=>beep(f,0.6,'triangle',0.05,0,0.5));},
+  rush:()=>{noise(0.5,0.06,300,4000);[784,988,1175].forEach((f,i)=>beep(f,0.14,'square',0.04,0,0.3+i*0.09));},
+  ding:()=>{beep(1568,0.25,'sine',0.07);beep(2093,0.35,'sine',0.05,0,0.08);},
+  bubble:()=>beep(500+rand(0,200),0.06,'sine',0.04,1.6),
+  ach:()=>[784,1047,1319,1568,2093].forEach((f,i)=>beep(f,0.1,'triangle',0.06,0,i*0.07)),
+  gift:()=>{for(let i=0;i<7;i++)beep(1200+rand(0,900),0.05,'square',0.02,0,i*0.05);},
 };
 function buzz(ms){try{if(!st.mute&&navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
 
@@ -255,6 +308,8 @@ cv.addEventListener('pointerdown',e=>{
   if(spec.open){const g2=specGeom();for(let i=0;i<SPECS.length;i++){const b2=g2.btn(i);if(p.x>=b2.x&&p.x<=b2.x+b2.w&&p.y>=b2.y&&p.y<=b2.y+b2.h){chooseSpec(SPECS[i].id);break;}}e.preventDefault();return;}
   {const ob=offline&&offBtn();if(ob&&p.x>=ob.x&&p.x<=ob.x+ob.w&&p.y>=ob.y&&p.y<=ob.y+ob.h){offline=null;sfx.unlock();e.preventDefault();return;}}
   if(offline){e.preventDefault();return;}
+  {const gb=gift&&giftGeom().btn;if(gb&&inRect(p,gb)){gift=null;sfx.unlock();save();e.preventDefault();return;}}
+  if(gift){e.preventDefault();return;}
   {const pb=pauseBtn();if(!offline&&Math.hypot(p.x-pb.x,p.y-pb.y)<m.r+3){openMenu();e.preventDefault();return;}}
   if(Math.hypot(p.x-m.x,p.y-m.y)<m.r+3){st.mute=st.mute?0:1;musicSync();save();e.preventDefault();return;}
   if(joy.on||e.button>0)return;
@@ -275,7 +330,7 @@ cv.addEventListener('contextmenu',e=>e.preventDefault());
 addEventListener('keydown',e=>{
   const kk=e.key.toLowerCase();
   if(title){if((kk==='enter'||kk===' ')&&!e.repeat){initAudio();startGame();}if(kk==='enter'||kk===' ')e.preventDefault();return;}
-  if((kk==='escape'||kk==='p')&&!e.repeat){if(menu==='confirm'){menu='main';hold.on=false;hold.t=0;}else if(menu)closeMenu();else openMenu();e.preventDefault();return;}
+  if((kk==='escape'||kk==='p')&&!e.repeat){if(menu==='confirm'||menu==='ach'){menu='main';hold.on=false;hold.t=0;}else if(menu)closeMenu();else openMenu();e.preventDefault();return;}
   if(menu)return;
   keys[e.key.toLowerCase()]=true;initAudio();
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))e.preventDefault();});
@@ -310,7 +365,7 @@ function buy(p){
   st.paid[p.id]=0;
   if(p.id==='branch'){
     const pr=st.prestige+1,mute=st.mute;
-    st=Object.assign(fresh(),{prestige:pr,mute,tut:1,first:1,earned:st.earned});spec.open=true;
+    st=Object.assign(fresh(),{prestige:pr,mute,tut:1,first:1,earned:st.earned,ach:st.ach,nsrv:st.nsrv,ntip:st.ntip,nvip:st.nvip,nwash:st.nwash,gd:st.gd,gs:st.gs});spec.open=true;
     player.carry.length=0;counter.stock=[0,0,0];for(const m of machines)m.stock=m.on()?Math.min(m.stock,8):0;rush.left=0;
     customers=[];for(const s of SLOTS)s.c=null;spawnT=0.4;resetBar();
     banner={txt:'¡Sucursal nº '+(pr+1)+'!',sub:'Todo se vende a +'+pr*100+'%',t:0};
@@ -320,6 +375,7 @@ function buy(p){
     floatTxt(p.x,p.y-40,p.id==='hire'?'¡Nuevo empleado!':'¡'+p.name+' mejorado!','#fff6e6');
     burst(p.x,p.y,40);
   }
+  if(p.id==='branch'){sfx.fanfare();shake=8;}else shake=Math.max(shake,2);
   player.padLock=true;syncHelpers();sfx.unlock();buzz(40);save();
 }
 function pickJob(h){
@@ -346,6 +402,7 @@ function dinerLeave(c,dirty){
   c.state='out';c.tx=W+LW*P/2+90;c.ty=c.y;
 }
 function dinerDone(c){
+  st.nsrv++;
   let pay=0;for(let k=0;k<3;k++)pay+=c.got[k]*priceOf(k);
   pay*=DINER_MUL*(rush.left>0?1.5:1);cash.pile+=pay;st.earned+=pay;
   for(let i=0;i<4;i++)fly.push({kind:'bill',x0:c.x,y0:c.y-40,to:cash,oy:-12,t:-i*0.05,dur:0.4});
@@ -354,7 +411,7 @@ function dinerDone(c){
 function update(dt){
   time+=dt;
   if(menu==='confirm'&&hold.on){hold.t+=dt;if(hold.t>=HOLD_T){resetGame();return;}}
-  if(spec.open||menu||offline||title)return;
+  if(spec.open||menu||offline||gift||title)return;
   /* player movement */
   let ix=joy.x,iy=joy.y;
   if(keys['arrowleft']||keys['a'])ix-=1;if(keys['arrowright']||keys['d'])ix+=1;
@@ -383,7 +440,7 @@ function update(dt){
     if(Math.hypot(player.x-z.x,player.y-z.y)<64&&m.stock>0&&player.carry.length<capacity()){
       player.takeT-=dt;
       if(player.takeT<=0){player.takeT=0.075;m.stock--;player.carry.push(m.t);const tr=trayOf(m);
-        flyItem(m.t,tr.x,tr.y,player,-30-player.carry.length*6,0.16);sfx.take(player.carry.length);buzz(8);}
+        flyItem(m.t,tr.x,tr.y,player,-30-player.carry.length*6,0.16);sfx.take(player.carry.length);if(player.carry.length===capacity())sfx.full();player.sq=0.08;buzz(8);}
     }
   }
   /* drop at counter */
@@ -408,7 +465,7 @@ function update(dt){
     if(player.plates>0&&Math.hypot(player.x-WASHER.x,player.y-WASHER.y)<70){
       washer.queue+=player.plates;flyItem('dplate',player.x,player.y-30,{x:WASHER.x,y:WASHER.y-26},0,0.2);player.plates=0;sfx.drop(3);barHintDone=true;}
     if(washer.cur===0&&washer.queue>0){washer.cur=Math.min(washer.queue,4+2*st.wash);washer.queue-=washer.cur;washer.t=0;}
-    if(washer.cur>0){washer.t+=dt;if(washer.t>=washTime()){plates.clean+=washer.cur;washer.cur=0;floatTxt(WASHER.x,WASHER.y-60,'¡Platos limpios!','#bfe6ff');sfx.sell();}}
+    if(washer.cur>0){bubT-=dt;if(bubT<=0){bubT=0.45;sfx.bubble();}washer.t+=dt;if(washer.t>=washTime()){st.nwash+=washer.cur;plates.clean+=washer.cur;washer.cur=0;floatTxt(WASHER.x,WASHER.y-60,'¡Platos limpios!','#bfe6ff');sfx.ding();}}
   }
   /* pads */
   let onPad=null;
@@ -490,7 +547,8 @@ function update(dt){
           if(!st.first&&done){st.first=1;banner={txt:'¡Primera venta!',sub:'Recoge el dinero de la mesa',t:0};burst(c.x,c.y,50);sfx.unlock();}
           const tip=done&&c.waitT<=TIP_T;let pay=0;for(let k=0;k<3;k++)pay+=c.got[k]*priceOf(k);
           pay*=(tip?1.3:1)*(rush.left>0?1.5:1)*(c.kind==='vip'&&done?3:1);
-          if(tip)floatTxt(c.x,c.y-104,'¡Propina!','#7dffb0');
+          if(tip){floatTxt(c.x,c.y-104,'¡Propina!','#7dffb0');st.ntip++;sfx.tip();}
+          if(done){st.nsrv++;if(c.kind==='vip')st.nvip++;burst(c.x,c.y+30,5);}
           if(c.kind==='vip'&&done)floatTxt(c.x,c.y-122,'¡VIP x3!','#ffd34d');
           cash.pile+=pay;st.earned+=pay;
           for(let i=0;i<Math.min(6,served+1);i++)fly.push({kind:'bill',x0:c.x,y0:c.y-40,to:cash,oy:-12,t:-i*0.05,dur:0.4});
@@ -512,9 +570,18 @@ function update(dt){
   confetti=confetti.filter(p=>p.t<1.4);
   if(rush.left>0){rush.left-=dt;if(rush.left<=0)rush.next=rand(70,100);}
   else if(st.earned>150){rush.next-=dt;if(rush.next<=0){rush.left=15;spawnT=0;
-    banner={txt:'¡HORA PICO!',sub:'Más clientes y pagan +50%',t:0};[784,988,1175].forEach((f,i)=>beep(f,0.14,'square',0.04,0,i*0.09));buzz(60);}}
+    banner={txt:'¡HORA PICO!',sub:'Más clientes y pagan +50%',t:0};sfx.rush();shake=3;buzz(60);}}
   if(banner){banner.t+=dt;if(banner.t>3.2)banner=null;}
   if(mSrc&&ac)mSrc.playbackRate.setTargetAtTime(rush.left>0?1.07:1,ac.currentTime,0.4);
+  if(st.money>prevMoney+0.5)moneyPulse=1;prevMoney=st.money;moneyPulse=Math.max(0,moneyPulse-dt*4);
+  shake=Math.max(0,shake-dt*20);player.sq=Math.max(0,(player.sq||0)-dt);
+  if(!REDUCED){puffT-=dt;if(puffT<=0){puffT=0.28;
+    for(const m of machines)if(m.on()&&m.t!==DONUT&&puffs.length<60)puffs.push({x:m.x+(m.t===PIZZA?8:0)+rand(-4,4),y:m.y-(m.t===PIZZA?34:26),t:0});
+    if(st.bar&&washer.cur>0&&puffs.length<60)puffs.push({x:WASHER.x+rand(-6,6),y:WASHER.y-34,t:0});}}
+  for(const pf of puffs){pf.t+=dt;pf.y-=16*dt;pf.x+=Math.sin(pf.t*5+pf.y)*6*dt;}
+  while(puffs.length&&puffs[0].t>1.2)puffs.shift();
+  for(const tt2 of toasts)tt2.t+=dt;while(toasts.length&&toasts[0].t>3)toasts.shift();
+  achT-=dt;if(achT<=0){achT=1;checkAch();checkGift();}
   shownMoney+=(st.money-shownMoney)*Math.min(1,dt*12);
   if(Math.abs(st.money-shownMoney)<0.5)shownMoney=st.money;
   saveT+=dt;if(saveT>3){saveT=0;save();}
@@ -620,6 +687,10 @@ function drawShop(){
   box(A(250),B(-60),Math.round(220/P),Math.round(62/P),'#fff6e6');
   R(A(250)+2,B(-60)+Math.round(62/P)-3,Math.round(220/P)-4,1,'#f0dcc0');
   wt(360,-30,'DONA MANÍA',30,'#ff4f8f',16,'center',1,null);
+  if(st.prestige>=1)for(const px of [36,684]){const x=A(px),y=B(782);pel(x,y+1,7,2,SHADOW);box(x-5,y-6,10,7,'#b8603a');pel(x,y-12,6,5,'#3f9a44');pel(x-3,y-14,3,3,'#57c15a');pel(x+3,y-13,3,3,'#57c15a');}
+  if(st.prestige>=2)for(const px of [150,570]){const x=A(px),y=B(-52);box(x-8,y,16,20,'#fff6e6');R(x-6,y+2,12,16,'#ffb3d1');R(x-3,y+6,6,4,'#fff6e6');R(x-4,y+12,8,2,'#ff4f8f');}
+  if(st.prestige>=3){const x=A(40),y=B(-50);box(x,y,Math.round(92/P),15,'#2a1a3a');wt(70,-40,'ABIERTO',13,(REDUCED||Math.sin(time*3)>-0.6)?'#ff6bd6':'#7a3a6a',9,'center',1,null);}
+  if(st.prestige>=4){const cols=['#ffd34d','#ff4f8f','#4fd0ff','#7dffb0'];for(let c=0;c*10<x1-x0;c++)R(x0+c*10+3,ay+9,2,2,cols[(c+(REDUCED?0:Math.floor(time*2)))%4]);}
   if(st.prestige)wt(360,10,'Sucursal nº '+(st.prestige+1)+(specOf()?' · '+specOf().name:''),13,'#fff6e6',10);
   q.fillStyle='rgba(42,26,38,.10)';q.fillRect(A(124),B(726),Math.round(472/P),Math.round(82/P));
   dashed(A(124),B(726),Math.round(472/P),Math.round(82/P),'rgba(255,246,230,.85)',REDUCED?0:Math.floor(time*6));
@@ -669,7 +740,7 @@ function drawChar(o,kind,pal,key){
   const x=A(o.x),y=B(o.y),fr=o.moving?((Math.floor(o.walk/2.2)%2)+2)%2:0,flip=(o.face||1)<0;
   pel(x,y,6,2,SHADOW);
   const grid=(kind==='guest'?GUEST:CHEF).concat([FEET[fr]]);
-  const c=sprite(key+'|'+fr,grid,pal,flip);blit(c,x-6,y-c.height+1-(fr?1:0));
+  const c=sprite(key+'|'+fr,grid,pal,flip),sq=(o.sq||0)>0?1:0;q.drawImage(c,Math.round(x-6),Math.round(y-c.height+1-(fr?1:0)+sq),c.width,c.height-sq);
 }
 function drawStackArt(arr,x,y,lean,wob){
   let oy=0;
@@ -742,6 +813,7 @@ function drawWorld(){
   }});
   if(st.bar){ents.push({y:292,d:drawBarArt});ents.push({y:WASHER.y,d:drawWasher});}
   ents.sort((a,b)=>a.y-b.y);for(const e of ents)e.d();
+  for(const pf of puffs){q.globalAlpha=clamp(0.7-pf.t*0.55,0,0.7);R(A(pf.x),B(pf.y),2,2,'#fff6e6');}q.globalAlpha=1;
 
   const ly=B(FLOOR_H);
   R(A(-14),ly,Math.round(124/P),15,'#c8553d');R(A(610),ly,Math.round(124/P),15,'#c8553d');
@@ -816,6 +888,7 @@ function drawTitle(){
   const pl=tg.play,pulse=REDUCED?0:Math.sin(time*4)*0.04,pw=pl.w*(1+pulse),ph=pl.h*(1+pulse),px=VW/2-pw/2,py=pl.y+pl.h/2-ph/2;
   hbox(px,py,pw,ph,'#2fbf8f');R(px*U+2,py*U+2,pw*U-4,1,'#8ff5cf');R(px*U+2,(py+ph)*U-3,pw*U-4,1,'#1f8f6a');
   tq(VW/2,pl.y+pl.h/2+1,hasSave?'CONTINUAR':'JUGAR',clamp(pl.h*0.5,24,32),'#fff6e6','center',1);
+  if(hasSave)tq(VW/2,pl.y+pl.h+42,'Logros '+achCount()+'/'+ACH.length,12,'#ffe27a','center',1,null);
   tq(VW/2,pl.y+pl.h+24,hasSave?'Sucursal nº '+(st.prestige+1)+' · Ganado $'+fmt(st.earned):'Tu primera tienda te espera',13,'#fff6e6','center',1,null);
   if(VH>=420&&!matchMedia('(pointer:coarse)').matches)tq(VW/2,VH-22,'Enter o espacio para jugar',12,'rgba(255,246,230,.7)','center',1,null);
   // sound toggle
@@ -826,12 +899,12 @@ function drawHud(tt){
   if(title){drawTitle();return;}
   g.font='700 24px '+FONT;
   const mt='$'+fmt(shownMoney),mw=Math.max(100,g.measureText(mt).width+64);
-  hbox(16,16,mw,44,'#3a2333');R(16*U+1,16*U+1,mw*U-2,1,'#5a3a50');
+  const pu=Math.round(moneyPulse*2);hbox(16-pu,16-pu,mw+2*pu,44+2*pu,moneyPulse>0.4?'#4a3550':'#3a2333');R(16*U+1,16*U+1,mw*U-2,1,'#5a3a50');
   item('bill',40*U,38*U+3);tq(64,38,mt,24,'#fff6e6','left',1,null);
   if(st.prestige){hbox(16+mw+8,20,52,36,'#ffc83d');tq(16+mw+34,38,'x'+(st.prestige+1),18,OUT,'center',1,null);}
   const mb=muteBtn();hbox(mb.x-mb.r,mb.y-mb.r,mb.r*2,mb.r*2,'#3a2333');
   blit(itemSpr(st.mute?'spkm':'spk'),mb.x*U-3,mb.y*U-3);
-  if(!spec.open&&!offline){const pb=pauseBtn();hbox(pb.x-pb.r,pb.y-pb.r,pb.r*2,pb.r*2,'#3a2333');
+  if(!spec.open&&!offline&&!gift){const pb=pauseBtn();hbox(pb.x-pb.r,pb.y-pb.r,pb.r*2,pb.r*2,'#3a2333');
     R(pb.x*U-3,pb.y*U-4,2,8,'#fff6e6');R(pb.x*U+1,pb.y*U-4,2,8,'#fff6e6');}
   const np=PADS.filter(padOn).sort((a,b)=>(costOf(a)-(st.paid[a.id]||0))-(costOf(b)-(st.paid[b.id]||0)))[0];
   if(np){const need=costOf(np)-(st.paid[np.id]||0),fr=clamp(st.money/need,0,1),ok=fr>=1,gw=Math.min(176,(VW-48)/2);
@@ -860,15 +933,34 @@ function drawHud(tt){
     tq(VW/2,c.y+86,st.hire?'Tus empleados ganaron':'La tienda ganó',14,'#fff6e6','center',1,null);
     tq(VW/2,c.y+114,'$'+fmt(offline.amt),28,'#7dffb0','center',1);
     hbox(b.x,b.y,b.w,b.h,'#2fbf8f');tq(VW/2,b.y+b.h/2,'¡Cobrar!',18,'#fff6e6','center',1);}
+  else if(gift){const c=giftGeom(),b=c.btn;hbox(c.x,c.y,c.w,c.h,'#3a2333');
+    tq(VW/2,c.y+28,'¡Regalo diario!',20,'#ffc83d','center',1);
+    tq(VW/2,c.y+54,'Día '+gift.streak+' de racha',13,'#fff6e6','center',1,null);
+    for(let i=0;i<7;i++)hbox(VW/2-70+i*21,c.y+72,15,15,i<gift.streak?'#ffc83d':'#4a3550');
+    tq(VW/2,c.y+124,'$'+fmt(gift.amt),30,'#7dffb0','center',1);
+    tq(VW/2,c.y+152,'Vuelve mañana para más',12,'#fff6e6','center',1,null);
+    hbox(b.x,b.y,b.w,b.h,'#2fbf8f');tq(VW/2,b.y+b.h/2,'¡Recoger!',18,'#fff6e6','center',1);}
+  if(toasts.length&&!menu&&!spec.open&&!offline&&!gift){const t3=toasts[0],a=clamp(Math.min(t3.t*4,(3-t3.t)*3),0,1),w=Math.min(280,VW-32);
+    if(a>0.05){q.globalAlpha=a;hbox(VW/2-w/2,108,w,44,'#2a7f62');q.globalAlpha=1;
+      tq(VW/2,122,t3.txt,15,'#ffe27a','center',a);tq(VW/2,141,t3.sub,12,'#fff6e6','center',a,null);}}
   if(menu){q.fillStyle='rgba(20,10,20,.6)';q.fillRect(0,0,LW,LH);
     const c=menuGeom();hbox(c.x,c.y,c.w,c.h,'#3a2333');
     if(menu==='main'){
       tq(VW/2,c.y+24,'Pausa',20,'#ffc83d','center',1);
       tq(VW/2,c.y+46,'Sucursal nº '+(st.prestige+1)+' · Ganado $'+fmt(st.earned),12,'#fff6e6','center',1,null);
       hbox(c.resume.x,c.resume.y,c.resume.w,c.resume.h,'#2fbf8f');tq(VW/2,c.resume.y+28,'Continuar',20,'#fff6e6','center',1);
-      hbox(c.sound.x,c.sound.y,c.sound.w,c.sound.h,'#4a3550');tq(VW/2,c.sound.y+24,'Sonido: '+(st.mute?'no':'sí'),16,'#fff6e6','center',1,null);
+      hbox(c.sound.x,c.sound.y,c.sound.w,c.sound.h,'#4a3550');tq(c.sound.x+c.sound.w/2,c.sound.y+24,'Sonido: '+(st.mute?'no':'sí'),14,'#fff6e6','center',1,null);
+      hbox(c.ach.x,c.ach.y,c.ach.w,c.ach.h,'#7a5a1e');tq(c.ach.x+c.ach.w/2,c.ach.y+24,'Logros '+achCount()+'/'+ACH.length,14,'#fff6e6','center',1,null);
       hbox(c.home.x,c.home.y,c.home.w,c.home.h,'#3d4a7a');tq(VW/2,c.home.y+22,'Menú principal',15,'#fff6e6','center',1,null);
       hbox(c.reset.x,c.reset.y,c.reset.w,c.reset.h,'#6e2a24');tq(VW/2,c.reset.y+18,'Empezar de cero',13,'#ffb4a8','center',1,null);
+    }else if(menu==='ach'){
+      tq(VW/2,c.y+24,'Logros '+achCount()+'/'+ACH.length,20,'#ffc83d','center',1);
+      const cw=(c.w-24)/2;
+      ACH.forEach((a,i)=>{const col=i%2,row=i>>1,x=c.x+12+col*cw,y=c.y+44+row*22,got=(st.ach>>i)&1;
+        hbox(x,y+2,14,14,got?'#2fbf8f':'#4a3550');tq(x+20,y+10,a.n,11,got?'#fff6e6':'rgba(255,246,230,.55)','left',1,null);});
+      const nx=ACH.find((a,i)=>!((st.ach>>i)&1));
+      tq(VW/2,c.y+190,nx?'Siguiente: '+nx.d:'¡Los tienes todos!',12,'#ffe27a','center',1,null);
+      hbox(c.back.x,c.back.y,c.back.w,c.back.h,'#2fbf8f');tq(VW/2,c.back.y+28,'Volver',20,'#fff6e6','center',1);
     }else{
       tq(VW/2,c.y+24,'¿Empezar de cero?',20,'#ffc83d','center',1);
       tq(VW/2,c.y+48,'Perderás todo tu progreso:',12,'#fff6e6','center',1,null);
@@ -885,6 +977,7 @@ function drawHud(tt){
 function draw(){
   q.setTransform(1,0,0,1,0,0);q.imageSmoothingEnabled=false;
   offx=Math.round(LW/2-cam.x/P);offy=Math.round(LH/2-cam.y/P);
+  if(shake>0&&!REDUCED&&!title){offx+=Math.round((Math.random()-.5)*shake);offy+=Math.round((Math.random()-.5)*shake);}
   const tt=drawWorld();
   g.setTransform(1,0,0,1,0,0);g.imageSmoothingEnabled=false;g.drawImage(lo,0,0,LW*K,LH*K);
   flushText();
@@ -902,7 +995,7 @@ function frame(now){
     draw();}catch(e){if(!frame.err){frame.err=1;console.error(e);}}
   requestAnimationFrame(frame);
 }
-window.__game={get st(){return st;},spec,chooseSpec,checkOffline,get offline(){return offline;},get music(){return {on:!!mSrc,rate:mSrc?mSrc.playbackRate.value:0,vol:mGain?mGain.gain.value:-1,state:ac?ac.state:"none"};},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
+window.__game={get st(){return st;},checkAch,checkGift,get gift(){return gift;},get toasts(){return toasts;},achCount,ACH,spec,chooseSpec,checkOffline,get offline(){return offline;},get music(){return {on:!!mSrc,rate:mSrc?mSrc.playbackRate.value:0,vol:mGain?mGain.gain.value:-1,state:ac?ac.state:"none"};},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
   get customers(){return customers;},get helpers(){return helpers;},
   seats:SEATS,plates,washer,platesTotal,openMenu,resetGame,startGame,get title(){return title;},get menu(){return menu;},hold,
   reset(){resetGame();}};
