@@ -41,7 +41,7 @@ for(const k of['money','earned','pile','first']){const v=Number(st[k]);st[k]=isF
 if(!['bak','caf','piz'].includes(st.spec))st.spec='';
 st.tut=Math.min(2,Math.max(0,Math.floor(Number(st.tut))||0));st.mute=st.mute?1:0;
 {const pd={};for(const k in st.paid){const v=Number(st.paid[k]);if(isFinite(v)&&v>0&&k in LIM)pd[k]=v;}st.paid=pd;}
-function save(){st.pile=cash.pile;st.ts=Date.now();try{localStorage.setItem(SAVE,JSON.stringify(st));}catch(e){}}
+function save(){st.pile=cash.pile;if(!title)st.ts=Date.now();try{localStorage.setItem(SAVE,JSON.stringify(st));}catch(e){}}
 
 const DONUT=0,COFFEE=1,PIZZA=2;
 const BASE_PRICE=[5,9,15],MAKE_T=[1,1.25,1.6],STACK_H=[3,6,3];
@@ -94,6 +94,7 @@ let helpers=[],customers=[],fly=[],floats=[],confetti=[];
 const rush={next:rand(70,100),left:0};
 let offline=null;const spec={open:false};
 let menu=null;const hold={on:false,id:null,t:0};const HOLD_T=1.2;
+let title=!/[?&]menu=0\b/.test(location.search); // main menu; ?menu=0 skips it (tests)
 let spawnT=0.5,time=0,saveT=0,banner=null,shownMoney=st.money;
 const THEMES=[['#f0cf96','#e6bf80'],['#c7ddf2','#b3cdea'],['#f2c6da','#e8b2ca'],['#d2ecbf','#bddfa6']];
 const HELPER_COLS=['#4f9dff','#2fbf8f','#a86ff2','#ff8a3d'];
@@ -110,6 +111,7 @@ syncHelpers();
 const OFF_MIN=60,OFF_CAP=3600;
 const offlineRate=()=>(0.1+0.4*st.hire*(1+0.15*st.hup))*8*mult();
 function checkOffline(){
+  if(title)return;
   const now=Date.now(),t0=Number(st.ts);st.ts=now;
   if(!isFinite(t0)||t0<=0||st.earned<30||offline)return;
   const sec=(now-t0)/1000;if(sec<OFF_MIN)return;
@@ -120,19 +122,20 @@ function checkOffline(){
 const fmtDur=s=>{const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>=24?'más de un día':h?h+' h '+m+' min':m+' min';};
 const pauseBtn=()=>({x:VW-16-22-52,y:16+22,r:22});
 function openMenu(){
-  if(spec.open||offline||menu)return;
+  if(spec.open||offline||menu||title)return;
   menu='main';hold.on=false;hold.t=0;joy.on=false;joy.x=joy.y=0;for(const k in keys)keys[k]=false;save();
 }
 function closeMenu(){menu=null;hold.on=false;hold.t=0;}
-function menuGeom(){const w=Math.min(300,VW-32),h=240,x=VW/2-w/2,y=Math.max(8,VH*0.5-h/2),bx=x+12,bw=w-24;
-  return{x,y,w,h,resume:{x:bx,y:y+62,w:bw,h:56},sound:{x:bx,y:y+126,w:bw,h:48},reset:{x:bx,y:y+190,w:bw,h:36},
-    hold:{x:bx,y:y+88,w:bw,h:44},back:{x:bx,y:y+160,w:bw,h:56}};}
+function menuGeom(){const w=Math.min(300,VW-32),h=290,x=VW/2-w/2,y=Math.max(8,VH*0.5-h/2),bx=x+12,bw=w-24;
+  return{x,y,w,h,resume:{x:bx,y:y+62,w:bw,h:56},sound:{x:bx,y:y+126,w:bw,h:48},home:{x:bx,y:y+182,w:bw,h:44},reset:{x:bx,y:y+240,w:bw,h:36},
+    hold:{x:bx,y:y+104,w:bw,h:44},back:{x:bx,y:y+206,w:bw,h:56}};}
 const inRect=(p,r)=>p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;
 function menuTap(p,e){
   const g2=menuGeom();
   if(menu==='main'){
     if(inRect(p,g2.resume))closeMenu();
     else if(inRect(p,g2.sound)){st.mute=st.mute?0:1;musicSync();save();}
+    else if(inRect(p,g2.home)){save();closeMenu();title=true;}
     else if(inRect(p,g2.reset)){menu='confirm';hold.on=false;hold.t=0;}
   }else if(menu==='confirm'){
     if(inRect(p,g2.back)){menu='main';hold.on=false;hold.t=0;}
@@ -155,6 +158,13 @@ function resetGame(){
   shownMoney=0;saveT=0;camReady=false;
   banner={txt:'¡Empezamos de cero!',sub:'Buena suerte, chef',t:0};
   save();
+}
+function startGame(){
+  if(!title)return;
+  title=false;joy.on=false;joy.x=joy.y=0;for(const k in keys)keys[k]=false;
+  initAudio();
+  if(st.prestige>0&&!st.spec)spec.open=true;
+  checkOffline();save();
 }
 function chooseSpec(id){
   if(!SPECS.some(x=>x.id===id))return;
@@ -228,9 +238,14 @@ function pt(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.
 cv.addEventListener('pointerdown',e=>{
   initAudio();if(ac&&ac.state==='suspended')ac.resume();
   const p=pt(e),m=muteBtn();
+  if(title){const tg=titleGeom();
+    if(Math.hypot(p.x-m.x,p.y-m.y)<m.r+3){st.mute=st.mute?0:1;musicSync();save();}
+    else if(inRect(p,tg.play))startGame();
+    e.preventDefault();return;}
   if(menu){menuTap(p,e);e.preventDefault();return;}
   if(spec.open){const g2=specGeom();for(let i=0;i<SPECS.length;i++){const b2=g2.btn(i);if(p.x>=b2.x&&p.x<=b2.x+b2.w&&p.y>=b2.y&&p.y<=b2.y+b2.h){chooseSpec(SPECS[i].id);break;}}e.preventDefault();return;}
   {const ob=offline&&offBtn();if(ob&&p.x>=ob.x&&p.x<=ob.x+ob.w&&p.y>=ob.y&&p.y<=ob.y+ob.h){offline=null;sfx.unlock();e.preventDefault();return;}}
+  if(offline){e.preventDefault();return;}
   {const pb=pauseBtn();if(!offline&&Math.hypot(p.x-pb.x,p.y-pb.y)<m.r+3){openMenu();e.preventDefault();return;}}
   if(Math.hypot(p.x-m.x,p.y-m.y)<m.r+3){st.mute=st.mute?0:1;musicSync();save();e.preventDefault();return;}
   if(joy.on||e.button>0)return;
@@ -250,6 +265,7 @@ cv.addEventListener('pointerup',endJoy);cv.addEventListener('pointercancel',endJ
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 addEventListener('keydown',e=>{
   const kk=e.key.toLowerCase();
+  if(title){if((kk==='enter'||kk===' ')&&!e.repeat){initAudio();startGame();}if(kk==='enter'||kk===' ')e.preventDefault();return;}
   if((kk==='escape'||kk==='p')&&!e.repeat){if(menu==='confirm'){menu='main';hold.on=false;hold.t=0;}else if(menu)closeMenu();else openMenu();e.preventDefault();return;}
   if(menu)return;
   keys[e.key.toLowerCase()]=true;initAudio();
@@ -308,7 +324,7 @@ function pickJob(h){
 function update(dt){
   time+=dt;
   if(menu==='confirm'&&hold.on){hold.t+=dt;if(hold.t>=HOLD_T){resetGame();return;}}
-  if(spec.open||menu)return;
+  if(spec.open||menu||offline||title)return;
   /* player movement */
   let ix=joy.x,iy=joy.y;
   if(keys['arrowleft']||keys['a'])ix-=1;if(keys['arrowright']||keys['d'])ix+=1;
@@ -694,8 +710,45 @@ function drawWorld(){
 
 /* ---------- HUD (css px → art px through U) ---------- */
 function hbox(x,y,w,h,fill,out=OUT){box(x*U,y*U,w*U,h*U,fill,out);}
+/* ---------- main menu ---------- */
+function titleGeom(){
+  const sz=clamp(Math.min(VW*0.17,VH*0.105),36,84),bw=Math.min(260,VW-64),bh=clamp(VH*0.085,50,66);
+  return{sz,l1:VH*0.15,l2:VH*0.15+sz*0.92,feet:VH*0.5,play:{x:VW/2-bw/2,y:VH*0.62,w:bw,h:bh}};
+}
+function sitem(k,ax,ay,sc){const c=itemSpr(k);q.drawImage(c,Math.round(ax-c.width*sc/2),Math.round(ay-c.height*sc),c.width*sc,c.height*sc);}
+function drawTitle(){
+  const tg=titleGeom(),hasSave=st.earned>0||st.first>0;
+  q.fillStyle='rgba(20,10,20,.74)';q.fillRect(0,0,LW,LH);
+  // falling snacks
+  if(!REDUCED)for(let i=0;i<14;i++){const sp=26+(i%4)*9,x=((i*137)%100)/100*VW+Math.sin(time*1.2+i)*8,y=((time*sp+i*97)%(VH+70))-35;
+    q.globalAlpha=.85;sitem(i%3===2?'pizza':i%3,x*U,y*U,2);}
+  q.globalAlpha=1;
+  // logo, letter by letter with a wave
+  const words=[['DONA','#ff4f8f',tg.l1],['MANÍA','#ffc83d',tg.l2]];
+  for(const [w,col,y] of words){
+    g.font='700 '+tg.sz+'px '+FONT;
+    const ws=[...w].map(ch=>g.measureText(ch).width),tot=ws.reduce((a,b)=>a+b,0);let x=VW/2-tot/2;
+    [...w].forEach((ch,i)=>{tq(x+ws[i]/2,y+(REDUCED?0:Math.sin(time*3+i*0.7+(col==='#ffc83d'?1.5:0))*5),ch,tg.sz,col,'center',1);x+=ws[i];});}
+  tq(VW/2,tg.l2+tg.sz*0.78,'¡Hornea, apila y cobra!',clamp(VW*0.04,12,16),'#fff6e6','center',1,null);
+  // mascot: the chef with a stack of donuts
+  const msc=VH<460?2:3,fr=REDUCED?0:Math.floor(time*3)%2,bob=REDUCED?0:Math.round(Math.abs(Math.sin(time*6))*1.5);
+  const cs=sprite('chef|'+fr,CHEF.concat([FEET[fr]]),CHEF_PAL,false);
+  const ax=VW/2*U,ay=tg.feet*U-bob;
+  q.fillStyle=SHADOW;q.fillRect(Math.round(ax-cs.width*msc/2),Math.round(tg.feet*U-1),cs.width*msc,msc);
+  q.drawImage(cs,Math.round(ax-cs.width*msc/2),Math.round(ay-cs.height*msc),cs.width*msc,cs.height*msc);
+  for(let k=0;k<4;k++)sitem(k%3===1?1:0,ax+cs.width*msc*0.62,ay-(2+k*3)*msc,msc);
+  // play button
+  const pl=tg.play,pulse=REDUCED?0:Math.sin(time*4)*0.04,pw=pl.w*(1+pulse),ph=pl.h*(1+pulse),px=VW/2-pw/2,py=pl.y+pl.h/2-ph/2;
+  hbox(px,py,pw,ph,'#2fbf8f');R(px*U+2,py*U+2,pw*U-4,1,'#8ff5cf');R(px*U+2,(py+ph)*U-3,pw*U-4,1,'#1f8f6a');
+  tq(VW/2,pl.y+pl.h/2+1,hasSave?'CONTINUAR':'JUGAR',clamp(pl.h*0.5,24,32),'#fff6e6','center',1);
+  tq(VW/2,pl.y+pl.h+24,hasSave?'Sucursal nº '+(st.prestige+1)+' · Ganado $'+fmt(st.earned):'Tu primera tienda te espera',13,'#fff6e6','center',1,null);
+  if(VH>=420&&!matchMedia('(pointer:coarse)').matches)tq(VW/2,VH-22,'Enter o espacio para jugar',12,'rgba(255,246,230,.7)','center',1,null);
+  // sound toggle
+  const mb=muteBtn();hbox(mb.x-mb.r,mb.y-mb.r,mb.r*2,mb.r*2,'#3a2333');blit(itemSpr(st.mute?'spkm':'spk'),mb.x*U-3,mb.y*U-3);
+}
 function drawHud(tt){
   q.clearRect(0,0,LW,LH);
+  if(title){drawTitle();return;}
   g.font='700 24px '+FONT;
   const mt='$'+fmt(shownMoney),mw=Math.max(100,g.measureText(mt).width+64);
   hbox(16,16,mw,44,'#3a2333');R(16*U+1,16*U+1,mw*U-2,1,'#5a3a50');
@@ -739,6 +792,7 @@ function drawHud(tt){
       tq(VW/2,c.y+46,'Sucursal nº '+(st.prestige+1)+' · Ganado $'+fmt(st.earned),12,'#fff6e6','center',1,null);
       hbox(c.resume.x,c.resume.y,c.resume.w,c.resume.h,'#2fbf8f');tq(VW/2,c.resume.y+28,'Continuar',20,'#fff6e6','center',1);
       hbox(c.sound.x,c.sound.y,c.sound.w,c.sound.h,'#4a3550');tq(VW/2,c.sound.y+24,'Sonido: '+(st.mute?'no':'sí'),16,'#fff6e6','center',1,null);
+      hbox(c.home.x,c.home.y,c.home.w,c.home.h,'#3d4a7a');tq(VW/2,c.home.y+22,'Menú principal',15,'#fff6e6','center',1,null);
       hbox(c.reset.x,c.reset.y,c.reset.w,c.reset.h,'#6e2a24');tq(VW/2,c.reset.y+18,'Empezar de cero',13,'#ffb4a8','center',1,null);
     }else{
       tq(VW/2,c.y+24,'¿Empezar de cero?',20,'#ffc83d','center',1);
@@ -775,10 +829,9 @@ function frame(now){
 }
 window.__game={get st(){return st;},spec,chooseSpec,checkOffline,get offline(){return offline;},get music(){return {on:!!mSrc,rate:mSrc?mSrc.playbackRate.value:0,vol:mGain?mGain.gain.value:-1,state:ac?ac.state:"none"};},rush,sync:()=>syncHelpers(),player,machines,counter,cash,PADS,costOf,padOn,update,
   get customers(){return customers;},get helpers(){return helpers;},
-  openMenu,resetGame,get menu(){return menu;},hold,
+  openMenu,resetGame,startGame,get title(){return title;},get menu(){return menu;},hold,
   reset(){resetGame();}};
-if(st.prestige>0&&!st.spec)spec.open=true;
-checkOffline();
+if(!title){if(st.prestige>0&&!st.spec)spec.open=true;checkOffline();}
 requestAnimationFrame(frame);
 })();
 </script>
